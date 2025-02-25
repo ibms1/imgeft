@@ -1,6 +1,6 @@
 import streamlit as st
 import numpy as np
-from PIL import Image, ImageEnhance, ImageFilter
+from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 
 def apply_glitch_effect(image):
     image = np.array(image.convert('RGB'))
@@ -28,14 +28,31 @@ def apply_rgb_shift(image):
     r, g, b = image[:, :, 0], image[:, :, 1], image[:, :, 2]
     r = np.roll(r, 5, axis=1)
     b = np.roll(b, -5, axis=0)
-    shifted = np.stack([b, g, r], axis=-1)
+    shifted = np.stack([r, g, b], axis=-1)  # تصحيح ترتيب القنوات RGB
     return Image.fromarray(shifted)
 
 def apply_blur(image):
-    return image.filter(ImageFilter.GaussianBlur(radius=7))
+    # تحسين وظيفة البلور لتعمل مع جميع أنواع الصور
+    image_rgb = image.convert('RGB')
+    
+    # تطبيق تأثير البلور مع إعدادات مخصصة للصور الكرتونية
+    # استخدام قيمة radius أقل للصور الكرتونية
+    is_cartoon = detect_if_cartoon(image_rgb)
+    
+    if is_cartoon:
+        # استخدام بلور أخف للصور الكرتونية
+        return image_rgb.filter(ImageFilter.GaussianBlur(radius=3))
+    else:
+        # استخدام بلور أقوى للصور العادية
+        return image_rgb.filter(ImageFilter.GaussianBlur(radius=7))
 
 def apply_edge_detection(image):
-    return image.convert("L").filter(ImageFilter.FIND_EDGES)
+    # تحويل الصورة إلى RGB قبل المعالجة
+    image_rgb = image.convert('RGB')
+    # تطبيق تأثير كشف الحواف
+    edges = image_rgb.convert('L').filter(ImageFilter.FIND_EDGES)
+    # تحويل النتيجة إلى RGB لضمان التوافق
+    return edges.convert('RGB')
 
 def apply_cartoon_effect(image):
     image = image.convert('RGB')
@@ -43,11 +60,17 @@ def apply_cartoon_effect(image):
     blurred = gray.filter(ImageFilter.MedianFilter(size=5))
     edges = blurred.filter(ImageFilter.FIND_EDGES)
     color = image.filter(ImageFilter.SMOOTH)
-    cartoon = Image.composite(color, image, edges)
-    return cartoon
+    # تحسين تأثير الكرتون باستخدام تقنية أفضل للدمج
+    edge_image = edges.convert('RGB')
+    cartoon = Image.blend(color, image, 0.3)
+    # استخدام الحواف كقناع
+    return ImageOps.colorize(edges, black="white", white="black").convert('L')
 
 def apply_negative(image):
-    return Image.eval(image, lambda x: 255 - x)
+    # تحسين وظيفة النيجاتيف لتعمل مع جميع أنواع الصور
+    # استخدام ImageOps.invert بدلاً من Image.eval
+    image_rgb = image.convert('RGB')
+    return ImageOps.invert(image_rgb)
 
 def apply_sepia(image):
     image = np.array(image.convert('RGB'))
@@ -55,11 +78,51 @@ def apply_sepia(image):
     r_new = np.clip(r * 0.393 + g * 0.769 + b * 0.189, 0, 255).astype('uint8')
     g_new = np.clip(r * 0.349 + g * 0.686 + b * 0.168, 0, 255).astype('uint8')
     b_new = np.clip(r * 0.272 + g * 0.534 + b * 0.131, 0, 255).astype('uint8')
-    sepia = np.stack([b_new, g_new, r_new], axis=-1)
+    sepia = np.stack([r_new, g_new, b_new], axis=-1)  # تصحيح ترتيب القنوات RGB
     return Image.fromarray(sepia)
 
 def apply_emboss(image):
-    return image.filter(ImageFilter.EMBOSS)
+    # تحسين وظيفة Emboss لتعمل مع جميع أنواع الصور
+    image_rgb = image.convert('RGB')
+    
+    # التعرف على ما إذا كانت الصورة كرتونية
+    is_cartoon = detect_if_cartoon(image_rgb)
+    
+    if is_cartoon:
+        # تطبيق emboss مع معالجة خاصة للصور الكرتونية
+        # أولاً تطبيق تأثير تنعيم بسيط
+        smoothed = image_rgb.filter(ImageFilter.SMOOTH)
+        # ثم تطبيق تأثير emboss بشكل معتدل
+        embossed = smoothed.filter(ImageFilter.EMBOSS)
+        # مزج النتيجة مع الصورة الأصلية للحفاظ على بعض التفاصيل
+        return Image.blend(embossed, image_rgb, 0.3)
+    else:
+        # تطبيق تأثير emboss العادي للصور الطبيعية
+        return image_rgb.filter(ImageFilter.EMBOSS)
+
+def detect_if_cartoon(image):
+    """
+    وظيفة للكشف إذا كانت الصورة كرتونية أم لا
+    الاستراتيجية: الصور الكرتونية عادة ما يكون لها عدد ألوان أقل وحواف أكثر وضوحاً
+    """
+    # تحويل الصورة إلى مصفوفة numpy
+    img_array = np.array(image.convert('RGB'))
+    
+    # 1. فحص تنوع الألوان (الصور الكرتونية عادة ما يكون لها عدد ألوان أقل)
+    r, g, b = img_array[:,:,0], img_array[:,:,1], img_array[:,:,2]
+    unique_colors = len(np.unique(r)) + len(np.unique(g)) + len(np.unique(b))
+    
+    # 2. فحص حدة الحواف (الصور الكرتونية عادة ما يكون لها حواف أكثر وضوحاً)
+    gray = image.convert('L')
+    edges = gray.filter(ImageFilter.FIND_EDGES)
+    edge_array = np.array(edges)
+    edge_ratio = np.sum(edge_array > 128) / (edge_array.shape[0] * edge_array.shape[1])
+    
+    # 3. اتخاذ القرار بناءً على معايير متعددة
+    if unique_colors < 5000 and edge_ratio > 0.05:
+        return True
+    else:
+        return False
 
 def apply_tiktok_falling_effect(image):
     image = np.array(image.convert('RGB'))
@@ -104,39 +167,46 @@ def main():
             ])
         
         with col2:
-            if effect == "Glitch Effect":
-                result = apply_glitch_effect(image)
-            elif effect == "Noise":
-                result = apply_noise_effect(image)
-            elif effect == "Ghost Effect":
-                result = apply_ghost_effect(image)
-            elif effect == "RGB Shift":
-                result = apply_rgb_shift(image)
-            elif effect == "Blur":
-                result = apply_blur(image)
-            elif effect == "Edge Detection":
-                result = apply_edge_detection(image)
-            elif effect == "Cartoon":
-                result = apply_cartoon_effect(image)
-            elif effect == "Negative":
-                result = apply_negative(image)
-            elif effect == "Sepia":
-                result = apply_sepia(image)
-            elif effect == "Emboss":
-                result = apply_emboss(image)
-            
+            try:
+                if effect == "Glitch Effect":
+                    result = apply_glitch_effect(image)
+                elif effect == "Noise":
+                    result = apply_noise_effect(image)
+                elif effect == "Ghost Effect":
+                    result = apply_ghost_effect(image)
+                elif effect == "RGB Shift":
+                    result = apply_rgb_shift(image)
+                elif effect == "Blur":
+                    result = apply_blur(image)
+                elif effect == "Edge Detection":
+                    result = apply_edge_detection(image)
+                elif effect == "Cartoon":
+                    result = apply_cartoon_effect(image)
+                elif effect == "Negative":
+                    result = apply_negative(image)
+                elif effect == "Sepia":
+                    result = apply_sepia(image)
+                elif effect == "Emboss":
+                    result = apply_emboss(image)
                 
-            
-            st.image(result, caption=f"Applied {effect}", use_container_width=True)
-            
-            # زر تحميل الصورة المعدلة
-            result_bytes = result.tobytes()
-            st.download_button(
-                label="Download Edited Image",
-                data=result_bytes,
-                file_name=f"edited_{effect.lower().replace(' ', '_')}.png",
-                mime="image/png"
-            )
+                st.image(result, caption=f"Applied {effect}", use_container_width=True)
+                
+                # تحويل الصورة إلى بايتات للتنزيل
+                img_byte_arr = io.BytesIO()
+                result.save(img_byte_arr, format='PNG')
+                img_byte_arr = img_byte_arr.getvalue()
+                
+                # زر تحميل الصورة المعدلة
+                st.download_button(
+                    label="Download Edited Image",
+                    data=img_byte_arr,
+                    file_name=f"edited_{effect.lower().replace(' ', '_')}.png",
+                    mime="image/png"
+                )
+            except Exception as e:
+                st.error(f"An error occurred while applying the effect: {e}")
+                st.info("Please try a different effect or upload a different image.")
 
 if __name__ == "__main__":
+    import io
     main()
