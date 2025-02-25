@@ -65,66 +65,23 @@ def apply_tiktok_falling_effect(image):
     image = np.array(image.convert('RGB'))
     h, w = image.shape[:2]
     result = np.zeros_like(image)
-    
-    # زيادة عدد الطبقات لمحاكاة تقليب صفحات الكتاب
-    num_layers = 12
-    # زاوية الدوران لتحقيق تأثير التقليب
-    rotation_angles = np.linspace(0, 15, num_layers)
-    # مقدار الإزاحة الأفقية
-    horizontal_shifts = np.linspace(0, int(w * 0.1), num_layers)
-    
-    for i in range(num_layers):
-        # حساب الإزاحة العمودية
-        vertical_shift = int((i / num_layers) * h * 0.25)
-        
-        # إنشاء نسخة من الصورة الأصلية
-        layer = image.copy()
-        
-        # تطبيق الإزاحة الأفقية
-        horizontal_shift = int(horizontal_shifts[i])
-        if horizontal_shift > 0:
-            layer = np.roll(layer, horizontal_shift, axis=1)
-        
-        # حساب منطقة المصدر والوجهة
+    num_frames = 8
+    max_shift = int(h * 0.15)
+    for i in range(num_frames):
+        shift = int((i / num_frames) * max_shift)
         y_src_start = 0
-        y_src_end = h - vertical_shift
-        y_dst_start = vertical_shift
+        y_src_end = h - shift
+        y_dst_start = shift
         y_dst_end = h
-        
-        # التأكد من صحة المناطق
         if y_src_end > y_src_start and y_dst_end > y_dst_start:
-            src_region = layer[y_src_start:y_src_end, :]
-            
-            # تغيير الشفافية حسب الطبقة
-            alpha = 1.0 - (i / num_layers) * 0.7
-            
-            # إضافة تأثير الظل للطبقات العليا
-            if i > 0:
-                # إضافة ظل خفيف لمحاكاة تراكب الصفحات
-                shadow_intensity = 0.85 - (i / num_layers) * 0.2
-                src_region = (src_region * shadow_intensity).astype('uint8')
-            
-            # دمج الطبقة مع النتيجة
+            src_region = image[y_src_start:y_src_end, :]
+            alpha = 1.0 - (i / num_frames) * 0.8
             if i == 0:
                 result[y_dst_start:y_dst_end, :] = src_region
             else:
                 dst_region = result[y_dst_start:y_dst_end, :]
-                # استخدام مزيج مرجح بين المنطقة الحالية والطبقة الجديدة
-                result[y_dst_start:y_dst_end, :] = (dst_region * (1.0 - alpha) + src_region * alpha).astype('uint8')
-    
-    # إضافة تأثير حدود للصفحات
-    edges = np.zeros_like(result)
-    for i in range(1, num_layers):
-        edge_pos = int((i / num_layers) * h * 0.25)
-        if edge_pos < h:
-            edge_width = 2
-            edges[edge_pos:edge_pos+edge_width, :] = [255, 255, 255]
-    
-    # دمج الحدود مع النتيجة النهائية
-    edge_alpha = 0.3
-    result = (result * (1.0 - edge_alpha) + edges * edge_alpha).astype('uint8')
-    
-    return Image.fromarray(result)
+                result[y_dst_start:y_dst_end, :] = (dst_region * (1.0 - alpha) + src_region * alpha)
+    return Image.fromarray(result.astype('uint8'))
 
 def main():
     st.set_page_config(page_title="Image Effects Editor", layout="wide")
@@ -143,7 +100,7 @@ def main():
             st.image(image, caption="Original Image", use_container_width=True)
             effect = st.selectbox("Choose an effect:", [
                 "Glitch Effect", "Noise", "Ghost Effect", "RGB Shift", "Blur",
-                "Edge Detection", "Cartoon", "Negative", "Sepia", "Emboss", "Falling Effect"
+                "Edge Detection", "Cartoon", "Negative", "Sepia", "Emboss"
             ])
         
         with col2:
@@ -167,18 +124,16 @@ def main():
                 result = apply_sepia(image)
             elif effect == "Emboss":
                 result = apply_emboss(image)
-            elif effect == "Falling Effect":
-                result = apply_tiktok_falling_effect(image)
+            
+                
             
             st.image(result, caption=f"Applied {effect}", use_container_width=True)
             
             # زر تحميل الصورة المعدلة
-            buf = Image.new("RGB", result.size, (255, 255, 255))
-            buf.paste(result)
-            buf_bytes = np.array(buf)
+            result_bytes = result.tobytes()
             st.download_button(
                 label="Download Edited Image",
-                data=Image.fromarray(buf_bytes).convert("RGB"),
+                data=result_bytes,
                 file_name=f"edited_{effect.lower().replace(' ', '_')}.png",
                 mime="image/png"
             )
