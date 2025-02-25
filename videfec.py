@@ -1,7 +1,6 @@
 import streamlit as st
-import cv2
 import numpy as np
-from PIL import Image, ImageEnhance
+from PIL import Image, ImageEnhance, ImageFilter
 
 def apply_glitch_effect(image):
     image = np.array(image.convert('RGB'))
@@ -15,71 +14,57 @@ def apply_glitch_effect(image):
 def apply_noise_effect(image):
     image = np.array(image.convert('RGB'))
     noise = np.random.randint(0, 50, image.shape, dtype='uint8')
-    noisy_image = cv2.add(image, noise)
+    noisy_image = np.clip(image + noise, 0, 255).astype('uint8')
     return Image.fromarray(noisy_image)
 
 def apply_ghost_effect(image):
     image = np.array(image.convert('RGB'))
     alpha = 0.5
-    ghost = cv2.addWeighted(image, alpha, np.roll(image, 5, axis=1), 1 - alpha, 0)
+    ghost = (image * alpha + np.roll(image, 5, axis=1) * (1 - alpha)).astype('uint8')
     return Image.fromarray(ghost)
 
 def apply_rgb_shift(image):
-    pil_image = image.convert('RGB')
-    image = np.array(pil_image)
-    b, g, r = cv2.split(image)
+    image = np.array(image.convert('RGB'))
+    r, g, b = image[:, :, 0], image[:, :, 1], image[:, :, 2]
     r = np.roll(r, 5, axis=1)
     b = np.roll(b, -5, axis=0)
-    shifted = cv2.merge((b, g, r))
+    shifted = np.stack([b, g, r], axis=-1)
     return Image.fromarray(shifted)
 
 def apply_blur(image):
-    image = np.array(image.convert('RGB'))
-    blurred = cv2.GaussianBlur(image, (15, 15), 0)
-    return Image.fromarray(blurred)
+    return image.filter(ImageFilter.GaussianBlur(radius=7))
 
 def apply_edge_detection(image):
-    image = np.array(image.convert("L"))
-    edges = cv2.Canny(image, 100, 200)
-    return Image.fromarray(edges)
+    return image.convert("L").filter(ImageFilter.FIND_EDGES)
 
 def apply_cartoon_effect(image):
-    pil_image = image.convert('RGB')
-    image = np.array(pil_image)
-    gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-    blurred = cv2.medianBlur(gray, 5)
-    edges = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 9, 9)
-    color = cv2.bilateralFilter(image, 9, 250, 250)
-    edges_rgb = cv2.cvtColor(edges, cv2.COLOR_GRAY2RGB)
-    cartoon = cv2.bitwise_and(color, edges_rgb)
-    return Image.fromarray(cartoon)
+    image = image.convert('RGB')
+    gray = image.convert('L')
+    blurred = gray.filter(ImageFilter.MedianFilter(size=5))
+    edges = blurred.filter(ImageFilter.FIND_EDGES)
+    color = image.filter(ImageFilter.SMOOTH)
+    cartoon = Image.composite(color, image, edges)
+    return cartoon
 
 def apply_negative(image):
-    image = np.array(image.convert('RGB'))
-    negative = cv2.bitwise_not(image)
-    return Image.fromarray(negative)
+    return Image.eval(image, lambda x: 255 - x)
 
 def apply_sepia(image):
-    pil_image = image.convert('RGB')
-    image = np.array(pil_image)
-    b, g, r = cv2.split(image)
-    b_new = np.clip(r * 0.272 + g * 0.534 + b * 0.131, 0, 255).astype(np.uint8)
-    g_new = np.clip(r * 0.349 + g * 0.686 + b * 0.168, 0, 255).astype(np.uint8)
-    r_new = np.clip(r * 0.393 + g * 0.769 + b * 0.189, 0, 255).astype(np.uint8)
-    sepia = cv2.merge([b_new, g_new, r_new])
+    image = np.array(image.convert('RGB'))
+    r, g, b = image[:, :, 0], image[:, :, 1], image[:, :, 2]
+    r_new = np.clip(r * 0.393 + g * 0.769 + b * 0.189, 0, 255).astype('uint8')
+    g_new = np.clip(r * 0.349 + g * 0.686 + b * 0.168, 0, 255).astype('uint8')
+    b_new = np.clip(r * 0.272 + g * 0.534 + b * 0.131, 0, 255).astype('uint8')
+    sepia = np.stack([b_new, g_new, r_new], axis=-1)
     return Image.fromarray(sepia)
 
 def apply_emboss(image):
-    image = np.array(image.convert('RGB'))
-    kernel = np.array([[0, -1, -1], [1, 0, -1], [1, 1, 0]])
-    embossed = cv2.filter2D(image, -1, kernel)
-    return Image.fromarray(embossed)
+    return image.filter(ImageFilter.EMBOSS)
 
 def apply_tiktok_falling_effect(image):
-    pil_image = image.convert('RGB')
-    img = np.array(pil_image)
-    h, w = img.shape[:2]
-    result = np.zeros_like(img)
+    image = np.array(image.convert('RGB'))
+    h, w = image.shape[:2]
+    result = np.zeros_like(image)
     num_frames = 8
     max_shift = int(h * 0.15)
     for i in range(num_frames):
@@ -89,18 +74,14 @@ def apply_tiktok_falling_effect(image):
         y_dst_start = shift
         y_dst_end = h
         if y_src_end > y_src_start and y_dst_end > y_dst_start:
-            src_region = img[y_src_start:y_src_end, :]
+            src_region = image[y_src_start:y_src_end, :]
             alpha = 1.0 - (i / num_frames) * 0.8
             if i == 0:
                 result[y_dst_start:y_dst_end, :] = src_region
             else:
                 dst_region = result[y_dst_start:y_dst_end, :]
-                result[y_dst_start:y_dst_end, :] = cv2.addWeighted(dst_region, 1.0, src_region, alpha, 0)
-    kernel_motion_blur = np.zeros((15, 15))
-    kernel_motion_blur[7, :] = np.ones(15)
-    kernel_motion_blur = kernel_motion_blur / 15
-    result = cv2.filter2D(result, -1, kernel_motion_blur)
-    return Image.fromarray(result)
+                result[y_dst_start:y_dst_end, :] = (dst_region * (1.0 - alpha) + src_region * alpha)
+    return Image.fromarray(result.astype('uint8'))
 
 def main():
     st.set_page_config(page_title="Image Effects Editor", layout="wide")
