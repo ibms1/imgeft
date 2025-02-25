@@ -1,6 +1,7 @@
 import streamlit as st
 import numpy as np
-from PIL import Image, ImageEnhance, ImageFilter, ImageOps
+import io
+from PIL import Image, ImageEnhance, ImageFilter, ImageOps, ImageDraw
 
 def apply_glitch_effect(image):
     image = np.array(image.convert('RGB'))
@@ -28,7 +29,7 @@ def apply_rgb_shift(image):
     r, g, b = image[:, :, 0], image[:, :, 1], image[:, :, 2]
     r = np.roll(r, 5, axis=1)
     b = np.roll(b, -5, axis=0)
-    shifted = np.stack([r, g, b], axis=-1)  # تصحيح ترتيب القنوات RGB
+    shifted = np.stack([r, g, b], axis=-1)
     return Image.fromarray(shifted)
 
 def apply_blur(image):
@@ -36,7 +37,6 @@ def apply_blur(image):
     image_rgb = image.convert('RGB')
     
     # تطبيق تأثير البلور مع إعدادات مخصصة للصور الكرتونية
-    # استخدام قيمة radius أقل للصور الكرتونية
     is_cartoon = detect_if_cartoon(image_rgb)
     
     if is_cartoon:
@@ -66,9 +66,53 @@ def apply_cartoon_effect(image):
     # استخدام الحواف كقناع
     return ImageOps.colorize(edges, black="white", white="black").convert('L')
 
+def apply_enhanced_cartoon(image):
+    """
+    تأثير كرتوني محسّن يجمع بين تقليل الألوان وتعزيز الحواف
+    """
+    # تحويل الصورة إلى RGB
+    image = image.convert('RGB')
+    
+    # تقليل عدد الألوان (تأثير الرسوم الكرتونية)
+    img_array = np.array(image)
+    
+    # استخدام تقنية تقليل الألوان
+    # تقريب قيم الألوان إلى أقرب مضاعف لـ 32
+    img_array = (img_array // 32) * 32
+    
+    # زيادة التشبع لجعل الألوان أكثر حيوية
+    temp_img = Image.fromarray(img_array)
+    enhancer = ImageEnhance.Color(temp_img)
+    color_enhanced = enhancer.enhance(1.5)
+    
+    # كشف الحواف
+    edges = image.filter(ImageFilter.CONTOUR)
+    edges = edges.convert('L')
+    
+    # تسميك الحواف
+    threshold = 100
+    edge_array = np.array(edges)
+    edge_array = np.where(edge_array < threshold, 0, 255).astype(np.uint8)
+    strong_edges = Image.fromarray(edge_array)
+    
+    # مزج الصورة ملونة مع الحواف
+    color_array = np.array(color_enhanced)
+    edge_mask = np.array(strong_edges.convert("L"))
+    
+    # إنشاء صورة نهائية مع حواف سوداء
+    result_array = color_array.copy()
+    edge_indices = edge_mask < 128
+    
+    # تطبيق الحواف السوداء
+    for c in range(3):  # للقنوات الثلاث RGB
+        channel = result_array[:,:,c]
+        channel[edge_indices] = 0  # جعل الحواف سوداء
+        result_array[:,:,c] = channel
+    
+    return Image.fromarray(result_array)
+
 def apply_negative(image):
     # تحسين وظيفة النيجاتيف لتعمل مع جميع أنواع الصور
-    # استخدام ImageOps.invert بدلاً من Image.eval
     image_rgb = image.convert('RGB')
     return ImageOps.invert(image_rgb)
 
@@ -78,7 +122,7 @@ def apply_sepia(image):
     r_new = np.clip(r * 0.393 + g * 0.769 + b * 0.189, 0, 255).astype('uint8')
     g_new = np.clip(r * 0.349 + g * 0.686 + b * 0.168, 0, 255).astype('uint8')
     b_new = np.clip(r * 0.272 + g * 0.534 + b * 0.131, 0, 255).astype('uint8')
-    sepia = np.stack([r_new, g_new, b_new], axis=-1)  # تصحيح ترتيب القنوات RGB
+    sepia = np.stack([r_new, g_new, b_new], axis=-1)
     return Image.fromarray(sepia)
 
 def apply_emboss(image):
@@ -99,6 +143,28 @@ def apply_emboss(image):
     else:
         # تطبيق تأثير emboss العادي للصور الطبيعية
         return image_rgb.filter(ImageFilter.EMBOSS)
+
+def apply_tiktok_falling_effect(image):
+    image = np.array(image.convert('RGB'))
+    h, w = image.shape[:2]
+    result = np.zeros_like(image)
+    num_frames = 8
+    max_shift = int(h * 0.15)
+    for i in range(num_frames):
+        shift = int((i / num_frames) * max_shift)
+        y_src_start = 0
+        y_src_end = h - shift
+        y_dst_start = shift
+        y_dst_end = h
+        if y_src_end > y_src_start and y_dst_end > y_dst_start:
+            src_region = image[y_src_start:y_src_end, :]
+            alpha = 1.0 - (i / num_frames) * 0.8
+            if i == 0:
+                result[y_dst_start:y_dst_end, :] = src_region
+            else:
+                dst_region = result[y_dst_start:y_dst_end, :]
+                result[y_dst_start:y_dst_end, :] = (dst_region * (1.0 - alpha) + src_region * alpha)
+    return Image.fromarray(result.astype('uint8'))
 
 def detect_if_cartoon(image):
     """
@@ -124,28 +190,6 @@ def detect_if_cartoon(image):
     else:
         return False
 
-def apply_tiktok_falling_effect(image):
-    image = np.array(image.convert('RGB'))
-    h, w = image.shape[:2]
-    result = np.zeros_like(image)
-    num_frames = 8
-    max_shift = int(h * 0.15)
-    for i in range(num_frames):
-        shift = int((i / num_frames) * max_shift)
-        y_src_start = 0
-        y_src_end = h - shift
-        y_dst_start = shift
-        y_dst_end = h
-        if y_src_end > y_src_start and y_dst_end > y_dst_start:
-            src_region = image[y_src_start:y_src_end, :]
-            alpha = 1.0 - (i / num_frames) * 0.8
-            if i == 0:
-                result[y_dst_start:y_dst_end, :] = src_region
-            else:
-                dst_region = result[y_dst_start:y_dst_end, :]
-                result[y_dst_start:y_dst_end, :] = (dst_region * (1.0 - alpha) + src_region * alpha)
-    return Image.fromarray(result.astype('uint8'))
-
 def main():
     st.set_page_config(page_title="Image Effects Editor", layout="wide")
     st.title("🎭 Image Effects Editor")
@@ -163,29 +207,60 @@ def main():
             st.image(image, caption="Original Image", use_container_width=True)
             effect = st.selectbox("Choose an effect:", [
                 "Glitch Effect", "Noise", "Ghost Effect", "RGB Shift", "Blur",
-                "Edge Detection", "Cartoon", "Negative", "Sepia", "Emboss"
+                "Edge Detection", "Cartoon", "Enhanced Cartoon", "Negative", "Sepia", "Emboss"
             ])
+            
+            # إضافة شريط تمرير لضبط شدة التأثير
+            if effect in ["Blur", "Sepia", "Noise"]:
+                intensity = st.slider("Effect Intensity", min_value=0.1, max_value=2.0, value=1.0, step=0.1)
+            else:
+                intensity = 1.0
         
         with col2:
             try:
                 if effect == "Glitch Effect":
                     result = apply_glitch_effect(image)
                 elif effect == "Noise":
-                    result = apply_noise_effect(image)
+                    # تعديل تأثير الضوضاء حسب الشدة
+                    if intensity != 1.0:
+                        image_array = np.array(image.convert('RGB'))
+                        noise = np.random.randint(0, int(50 * intensity), image_array.shape, dtype='uint8')
+                        noisy_image = np.clip(image_array + noise, 0, 255).astype('uint8')
+                        result = Image.fromarray(noisy_image)
+                    else:
+                        result = apply_noise_effect(image)
                 elif effect == "Ghost Effect":
                     result = apply_ghost_effect(image)
                 elif effect == "RGB Shift":
                     result = apply_rgb_shift(image)
                 elif effect == "Blur":
-                    result = apply_blur(image)
+                    # تعديل نصف قطر البلور حسب الشدة
+                    image_rgb = image.convert('RGB')
+                    is_cartoon = detect_if_cartoon(image_rgb)
+                    radius = 3 if is_cartoon else 7
+                    radius = radius * intensity
+                    result = image_rgb.filter(ImageFilter.GaussianBlur(radius=radius))
                 elif effect == "Edge Detection":
                     result = apply_edge_detection(image)
                 elif effect == "Cartoon":
                     result = apply_cartoon_effect(image)
+                elif effect == "Enhanced Cartoon":
+                    result = apply_enhanced_cartoon(image)
                 elif effect == "Negative":
                     result = apply_negative(image)
                 elif effect == "Sepia":
-                    result = apply_sepia(image)
+                    # تعديل قوة تأثير السيبيا حسب الشدة
+                    if intensity != 1.0:
+                        image_array = np.array(image.convert('RGB'))
+                        r, g, b = image_array[:, :, 0], image_array[:, :, 1], image_array[:, :, 2]
+                        intensity_factor = intensity
+                        r_new = np.clip(r * 0.393 * intensity_factor + g * 0.769 * intensity_factor + b * 0.189 * intensity_factor, 0, 255).astype('uint8')
+                        g_new = np.clip(r * 0.349 * intensity_factor + g * 0.686 * intensity_factor + b * 0.168 * intensity_factor, 0, 255).astype('uint8')
+                        b_new = np.clip(r * 0.272 * intensity_factor + g * 0.534 * intensity_factor + b * 0.131 * intensity_factor, 0, 255).astype('uint8')
+                        sepia = np.stack([r_new, g_new, b_new], axis=-1)
+                        result = Image.fromarray(sepia)
+                    else:
+                        result = apply_sepia(image)
                 elif effect == "Emboss":
                     result = apply_emboss(image)
                 
@@ -203,10 +278,14 @@ def main():
                     file_name=f"edited_{effect.lower().replace(' ', '_')}.png",
                     mime="image/png"
                 )
+                
+                # إضافة معلومات عن نوع الصورة
+                is_cartoon = detect_if_cartoon(image)
+                st.info(f"Image detected as: {'Cartoon/Illustration' if is_cartoon else 'Natural Photo'}")
+                
             except Exception as e:
                 st.error(f"An error occurred while applying the effect: {e}")
                 st.info("Please try a different effect or upload a different image.")
 
 if __name__ == "__main__":
-    import io
     main()
