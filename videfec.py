@@ -37,9 +37,9 @@ def apply_blur(image):
     image_rgb = image.convert('RGB')
     
     # تطبيق تأثير البلور مع إعدادات مخصصة للصور الكرتونية
-    is_cartoon = detect_if_cartoon(image_rgb)
+    is_Draw = detect_if_Draw(image_rgb)
     
-    if is_cartoon:
+    if is_Draw:
         # استخدام بلور أخف للصور الكرتونية
         return image_rgb.filter(ImageFilter.GaussianBlur(radius=3))
     else:
@@ -54,7 +54,19 @@ def apply_edge_detection(image):
     # تحويل النتيجة إلى RGB لضمان التوافق
     return edges.convert('RGB')
 
-def apply_cartoon_effect(image):
+def apply_Draw_effect(image):
+    image = image.convert('RGB')
+    gray = image.convert('L')
+    blurred = gray.filter(ImageFilter.MedianFilter(size=5))
+    edges = blurred.filter(ImageFilter.FIND_EDGES)
+    color = image.filter(ImageFilter.SMOOTH)
+    # تحسين تأثير الكرتون باستخدام تقنية أفضل للدمج
+    edge_image = edges.convert('RGB')
+    Draw = Image.blend(color, image, 0.3)
+    # استخدام الحواف كقناع
+    return ImageOps.colorize(edges, black="white", white="black").convert('L')
+
+def apply_enhanced_Draw(image):
     """
     تأثير كرتوني محسّن يجمع بين تقليل الألوان وتعزيز الحواف
     """
@@ -118,9 +130,9 @@ def apply_emboss(image):
     image_rgb = image.convert('RGB')
     
     # التعرف على ما إذا كانت الصورة كرتونية
-    is_cartoon = detect_if_cartoon(image_rgb)
+    is_Draw = detect_if_Draw(image_rgb)
     
-    if is_cartoon:
+    if is_Draw:
         # تطبيق emboss مع معالجة خاصة للصور الكرتونية
         # أولاً تطبيق تأثير تنعيم بسيط
         smoothed = image_rgb.filter(ImageFilter.SMOOTH)
@@ -154,7 +166,7 @@ def apply_tiktok_falling_effect(image):
                 result[y_dst_start:y_dst_end, :] = (dst_region * (1.0 - alpha) + src_region * alpha)
     return Image.fromarray(result.astype('uint8'))
 
-def detect_if_cartoon(image):
+def detect_if_Draw(image):
     """
     وظيفة للكشف إذا كانت الصورة كرتونية أم لا
     الاستراتيجية: الصور الكرتونية عادة ما يكون لها عدد ألوان أقل وحواف أكثر وضوحاً
@@ -195,7 +207,7 @@ def main():
             st.image(image, caption="Original Image", use_container_width=True)
             effect = st.selectbox("Choose an effect:", [
                 "Glitch Effect", "Noise", "Ghost Effect", "RGB Shift", "Blur",
-                "Edge Detection", "Cartoon", "Negative", "Sepia", "Emboss"
+                "Edge Detection", "Draw", "Cartoon", "Negative", "Sepia", "Emboss"
             ])
             
             # إضافة شريط تمرير لضبط شدة التأثير
@@ -224,14 +236,16 @@ def main():
                 elif effect == "Blur":
                     # تعديل نصف قطر البلور حسب الشدة
                     image_rgb = image.convert('RGB')
-                    is_cartoon = detect_if_cartoon(image_rgb)
-                    radius = 3 if is_cartoon else 7
+                    is_Draw = detect_if_Draw(image_rgb)
+                    radius = 3 if is_Draw else 7
                     radius = radius * intensity
                     result = image_rgb.filter(ImageFilter.GaussianBlur(radius=radius))
                 elif effect == "Edge Detection":
                     result = apply_edge_detection(image)
+                elif effect == "Draw":
+                    result = apply_Draw_effect(image)
                 elif effect == "Cartoon":
-                    result = apply_cartoon_effect(image)
+                    result = apply_enhanced_Draw(image)
                 elif effect == "Negative":
                     result = apply_negative(image)
                 elif effect == "Sepia":
@@ -266,8 +280,8 @@ def main():
                 )
                 
                 # إضافة معلومات عن نوع الصورة
-                is_cartoon = detect_if_cartoon(image)
-                st.info(f"Image detected as: {'Cartoon/Illustration' if is_cartoon else 'Natural Photo'}")
+                is_Draw = detect_if_Draw(image)
+                st.info(f"Image detected as: {'Draw/Illustration' if is_Draw else 'Natural Photo'}")
                 
             except Exception as e:
                 st.error(f"An error occurred while applying the effect: {e}")
